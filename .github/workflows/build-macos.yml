@@ -1,0 +1,78 @@
+name: Build macOS bundle
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: macos-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Universal .app + .dmg (unsigned)
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    env:
+      CI: true
+      # Keep the bundle unsigned so it builds without an Apple Developer account.
+      APPLE_SIGNING_IDENTITY: "-"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust (both macOS architectures)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: universal-macos
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Build universal bundle
+        run: npx tauri build --target universal-apple-darwin
+
+      - name: Show bundle contents
+        run: |
+          find src-tauri/target/universal-apple-darwin/release/bundle -maxdepth 3 -type f | sort
+          du -sh src-tauri/target/universal-apple-darwin/release/bundle/* || true
+
+      - name: Zip the .app (preserves symlinks and permissions)
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            "src-tauri/target/universal-apple-darwin/release/bundle/macos/WinMac Launcher.app" \
+            "WinMac-Launcher-macos-universal.zip"
+
+      - name: Upload .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinMac-Launcher-macos-universal-dmg
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinMac-Launcher-macos-universal-app
+          path: WinMac-Launcher-macos-universal.zip
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,25 @@
+{
+  "name": "winmac-launcher",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Run Windows games and apps on macOS through Wine + Apple Game Porting Toolkit",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "icons": "node scripts/gen-icon.mjs && tauri icon src-tauri/icons/source.png"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.2.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11"
+  }
+}

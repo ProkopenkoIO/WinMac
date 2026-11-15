@@ -1,0 +1,43 @@
+[package]
+name = "winmac-launcher"
+version = "0.1.0"
+description = "Run Windows games and apps on macOS through Wine + Apple Game Porting Toolkit"
+authors = ["WinMac Launcher"]
+edition = "2021"
+rust-version = "1.77.2"
+default-run = "winmac-launcher"
+
+[lib]
+name = "winmac_launcher_lib"
+# Desktop-only: `rlib` is enough. Keeping `cdylib`/`staticlib` would break the
+# Windows GNU fallback toolchain (the DLL export table overflows) and is only
+# required for mobile targets.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+walkdir = "2"
+
+# Engine downloader / archive extraction (macOS) and simulated downloads (Windows mock)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = "0.3"
+flate2 = "1"
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

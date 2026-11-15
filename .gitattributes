@@ -1,0 +1,6 @@
+# Normalise text files to LF so Windows, Linux and macOS checkouts match.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
