@@ -55,6 +55,17 @@ jobs:
       - name: Build universal bundle
         run: npx tauri build --target universal-apple-darwin
 
+      # A Homebrew dependency makes the unsigned bundle crash on launch with
+      # "the application cannot be opened" because dyld cannot find the dylib.
+      - name: Verify the bundle has no Homebrew dependencies
+        run: |
+          BIN="src-tauri/target/universal-apple-darwin/release/bundle/macos/WinMac Launcher.app/Contents/MacOS/winmac-launcher"
+          otool -L "$BIN" | tee /tmp/otool.txt
+          if grep -E '/opt/homebrew|/usr/local' /tmp/otool.txt; then
+            echo "::error::The bundle links against a Homebrew library"
+            exit 1
+          fi
+
       - name: Show bundle contents
         run: |
           find src-tauri/target/universal-apple-darwin/release/bundle -maxdepth 3 -type f | sort

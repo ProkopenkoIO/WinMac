@@ -37,7 +37,9 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Gcenx Wine builds (the default downloadable engine) ship as .tar.xz.
-xz2 = "0.1"
+# `static` keeps the bundle self-contained: without it lzma-sys links the
+# build machine's Homebrew liblzma, which end users do not have.
+xz2 = { version = "0.1", features = ["static"] }
 
 [profile.release]
 codegen-units = 1
