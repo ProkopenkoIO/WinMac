@@ -3,6 +3,7 @@ import { icon } from "./icons";
 import { toast } from "./toast";
 import type {
   ContainerSummary,
+  EngineInfo,
   EngineProgress,
   EngineState,
   Game,
@@ -146,6 +147,17 @@ function segValue(root: HTMLElement, group: string): string {
   return active?.dataset.value ?? "";
 }
 
+function setSegmented(root: HTMLElement, group: string, value: string): void {
+  root.querySelectorAll<HTMLElement>(`[data-seg="${group}"] button`).forEach((button) => {
+    button.classList.toggle("active", button.dataset.value === value);
+  });
+}
+
+/** Plain Wine builds have no D3DMetal shims; only GPTK/CrossOver do. */
+function recommendedBackend(engine: EngineInfo | undefined): GraphicsBackend {
+  return engine?.kind === "gptk" || engine?.kind === "crossover" ? "d3dmetal" : "wined3d";
+}
+
 function segControl(name: string, options: Array<[string, string]>, value: string): string {
   return `<div class="segmented" data-seg="${name}">
     ${options
@@ -240,6 +252,8 @@ export async function openNewContainerModal(options: {
 }): Promise<void> {
   const available = options.engines?.engines.filter((e) => e.available) ?? [];
   const defaultEngine = available.find((e) => e.selected) ?? available[0];
+  const defaultBackend = recommendedBackend(defaultEngine);
+  let recommended = defaultBackend;
   const handle = showModal({
     title: "New container",
     subtitle: "An isolated Windows prefix with its own C: drive, registry and game library.",
@@ -267,8 +281,8 @@ export async function openNewContainerModal(options: {
             ["dxvk", "DXVK"],
             ["wined3d", "WineD3D"],
           ],
-          "d3dmetal",
-        ) + `<div class="hint" data-backend-hint>${backendDescription("d3dmetal")}</div>`,
+          defaultBackend,
+        ) + `<div class="hint" data-backend-hint>${backendDescription(defaultBackend)}</div>`,
       )}
       ${field(
         "Wine engine",
@@ -302,6 +316,19 @@ export async function openNewContainerModal(options: {
   bindSegmented(handle.body, "backend", (value) => {
     const hint = handle.body.querySelector("[data-backend-hint]");
     if (hint) hint.textContent = backendDescription(value);
+  });
+
+  const engineSelect = handle.body.querySelector<HTMLSelectElement>("[data-engine]");
+  engineSelect?.addEventListener("change", () => {
+    const engine = available.find((item) => item.id === engineSelect.value) ?? defaultEngine;
+    const next = recommendedBackend(engine);
+    // Only auto-switch while the user is still on the previous suggestion.
+    if (segValue(handle.body, "backend") === recommended) {
+      setSegmented(handle.body, "backend", next);
+      const hint = handle.body.querySelector("[data-backend-hint]");
+      if (hint) hint.textContent = backendDescription(next);
+    }
+    recommended = next;
   });
 
   handle.body.querySelector("[data-browse-location]")?.addEventListener("click", async () => {

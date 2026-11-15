@@ -64,15 +64,15 @@ pub fn catalog() -> Vec<EngineCatalogItem> {
             recommended: true,
         },
         EngineCatalogItem {
-            id: "whisky-wine-latest".into(),
-            name: "Wine (Whisky build)".into(),
+            id: "gcenx-wine-latest".into(),
+            name: "Wine (Gcenx build)".into(),
             version: "latest".into(),
             kind: EngineKind::Wine,
             description:
-                "Community Wine build with macOS patches. Downloads the newest release archive from GitHub and installs it into the launcher engine folder."
+                "Community Wine build for macOS with MoltenVK, Mono, Gecko and GStreamer bundled. Downloads the newest release archive from GitHub (about 215 MB)."
                     .into(),
-            url: "gh:Whisky-App/wine-builds".into(),
-            approx_size_mb: 180,
+            url: "gh:Gcenx/macOS_Wine_builds".into(),
+            approx_size_mb: 215,
             recommended: true,
         },
         EngineCatalogItem {
@@ -246,6 +246,22 @@ mod macos {
         ("/opt/homebrew/bin/wine", "Wine (Homebrew)"),
         ("/usr/local/bin/wine64", "Wine"),
         ("/usr/local/bin/wine", "Wine"),
+        (
+            "/Applications/Wine Stable.app/Contents/Resources/wine/bin/wine64",
+            "Wine Stable (Homebrew)",
+        ),
+        (
+            "/Applications/Wine Staging.app/Contents/Resources/wine/bin/wine64",
+            "Wine Staging (Homebrew)",
+        ),
+        (
+            "/Applications/Wine Devel.app/Contents/Resources/wine/bin/wine64",
+            "Wine Devel (Homebrew)",
+        ),
+        (
+            "/Applications/Wine Crossover.app/Contents/Resources/wine/bin/wine64",
+            "Wine Crossover (Homebrew)",
+        ),
         (
             "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine",
             "CrossOver",
@@ -851,7 +867,12 @@ async fn resolve_download_url(client: &reqwest::Client, spec: &str) -> AppResult
         .filter_map(|asset| {
             let name = asset.get("name")?.as_str()?;
             let url = asset.get("browser_download_url")?.as_str()?;
-            if name.ends_with(".tar.gz") || name.ends_with(".tgz") || name.ends_with(".zip") {
+            if name.ends_with(".tar.gz")
+                || name.ends_with(".tgz")
+                || name.ends_with(".tar.xz")
+                || name.ends_with(".txz")
+                || name.ends_with(".zip")
+            {
                 Some((name.to_string(), url.to_string()))
             } else {
                 None
@@ -862,7 +883,8 @@ async fn resolve_download_url(client: &reqwest::Client, spec: &str) -> AppResult
             assets.iter().find_map(|asset| {
                 let name = asset.get("name")?.as_str()?;
                 let url = asset.get("browser_download_url")?.as_str()?;
-                if name.ends_with(".tar.gz") || name.ends_with(".zip") {
+                if name.ends_with(".tar.gz") || name.ends_with(".tar.xz") || name.ends_with(".zip")
+                {
                     Some((name.to_string(), url.to_string()))
                 } else {
                     None
@@ -915,13 +937,21 @@ async fn download_task(
     let resolved = resolve_download_url(&client, url).await?;
     let response = client.get(&resolved).send().await?.error_for_status()?;
     let total = response.content_length().unwrap_or(0);
-    let is_zip = resolved
+    let lower = resolved
         .split('?')
         .next()
-        .map(|value| value.to_lowercase().ends_with(".zip"))
-        .unwrap_or(false);
-    let archive_path =
-        downloads_dir.join(format!("{id}.{}", if is_zip { "zip" } else { "tar.gz" }));
+        .map(|value| value.to_lowercase())
+        .unwrap_or_default();
+    let extension = if lower.ends_with(".zip") {
+        "zip"
+    } else if lower.ends_with(".tar.xz") {
+        "tar.xz"
+    } else if lower.ends_with(".txz") {
+        "txz"
+    } else {
+        "tar.gz"
+    };
+    let archive_path = downloads_dir.join(format!("{id}.{extension}"));
 
     let mut file = fs::File::create(&archive_path)?;
     let mut stream = response.bytes_stream();
@@ -1058,13 +1088,22 @@ fn extract_archive(archive: &Path, destination: &Path) -> AppResult<()> {
         return Ok(());
     }
 
+    if file_name.ends_with(".tar.xz") || file_name.ends_with(".txz") {
+        let file = fs::File::open(archive)?;
+        let decoder = xz2::read::XzDecoder::new(file);
+        let mut tar = tar::Archive::new(decoder);
+        tar.unpack(destination)
+            .map_err(|error| AppError::Archive(error.to_string()))?;
+        return Ok(());
+    }
+
     // Unknown container format: try tar.gz, then fall back to a clear error.
     let file = fs::File::open(archive)?;
     let decoder = flate2::read::GzDecoder::new(file);
     let mut tar = tar::Archive::new(decoder);
     tar.unpack(destination).map_err(|error| {
         AppError::Archive(format!(
-            "Unsupported archive (expected .tar.gz or .zip): {error}"
+            "Unsupported archive (expected .tar.gz, .tar.xz or .zip): {error}"
         ))
     })?;
     Ok(())

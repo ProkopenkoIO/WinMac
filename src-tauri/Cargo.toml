@@ -35,6 +35,10 @@ flate2 = "1"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Gcenx Wine builds (the default downloadable engine) ship as .tar.xz.
+xz2 = "0.1"
+
 [profile.release]
 codegen-units = 1
 lto = true

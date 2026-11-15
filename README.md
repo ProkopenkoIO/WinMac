@@ -238,11 +238,12 @@ The launcher looks in the managed folder (`…/WinMacLauncher/engine/<id>/`) and
 /Applications/Game Porting Toolkit.app/Contents/Resources/wine/bin/wine64
 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine
 /Applications/Whisky.app/Contents/Resources/Libraries/Wine/bin/wine64
+/Applications/Wine Stable.app/Contents/Resources/wine/bin/wine64
 /opt/homebrew/bin/wine64
 /usr/local/bin/wine64
 ```
 
-Anything else can be added with **Engine manager → Locate wine binary**. Managed engines are downloaded from GitHub releases (`gh:owner/repo`) as `.tar.gz` / `.zip`; extraction flattens the archive and locates `wine64` automatically.
+Anything else can be added with **Engine manager → Locate wine binary**. Managed engines are downloaded from GitHub releases (`gh:owner/repo`) as `.tar.gz`, `.tar.xz` or `.zip`; extraction flattens the archive and locates `wine64` automatically.
 
 ---
 

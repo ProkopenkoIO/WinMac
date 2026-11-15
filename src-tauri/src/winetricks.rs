@@ -54,6 +54,12 @@ pub fn verbs() -> Vec<WinetricksVerb> {
             "DirectX",
         ),
         entry(
+            "dxvk",
+            "DXVK (DirectX 9-11)",
+            "Installs DXVK into this container. Required by the DXVK backend when the Wine build does not bundle it.",
+            "Graphics",
+        ),
+        entry(
             "xact",
             "XACT audio",
             "Audio engine used by many Unreal Engine 3 titles.",
