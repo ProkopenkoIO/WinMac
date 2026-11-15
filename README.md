@@ -76,20 +76,62 @@ winget install Microsoft.VisualStudio.2022.BuildTools   # "Desktop development w
 npm run tauri:dev
 ```
 
-### Development on macOS
+### Running on macOS (from source)
+
+Prerequisites — Xcode Command Line Tools (WebKit headers and `codesign`), Node.js 20+, Rust stable:
 
 ```bash
-brew install node rustup-init
-rustup-init -y
+xcode-select --install
+brew install node
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Clone, install and start the app:
+
+```bash
+git clone <your-repo-url> winmac-launcher
+cd winmac-launcher
 npm install
 npm run tauri:dev
 ```
 
-Build a local bundle:
+The first run compiles the Rust side (a few minutes) and opens the native window; Vite serves the UI on port 1420 with hot reload.
+
+#### 1. Select a Wine engine
+
+The launcher never bundles Wine. Open **Engine manager** (the engine pill in the bottom-left corner) and either:
+
+- **download** a managed build (a GitHub release `.tar.gz` / `.zip`),
+- **locate** an existing `wine64` binary, or
+- use an auto-detected installation (Game Porting Toolkit, Homebrew Wine, CrossOver, Whisky).
+
+D3DMetal needs a Game Porting Toolkit runtime. Without GPTK, pick **DXVK** if your Wine build ships the DXVK DLLs (Whisky and CrossOver builds do), otherwise **WineD3D** as the universal fallback.
+
+#### 2. Create a container and install something
+
+**New container** → choose Windows 10/11, backend, ESync/MSync → **Create**. Then:
+
+- **Run a .exe** to launch a Steam / GOG / Epic installer or a portable game;
+- **Open C: drive** to copy files into `drive_c` by hand;
+- **Winetricks** to add `vcrun2019`, `dotnet48`, `d3dx9` and similar dependencies.
+
+Programs under `drive_c/Program Files` and `drive_c/Games` are picked up automatically.
+
+#### 3. Play
+
+Press **Play**. Wine output streams into the Output panel; **Stop** kills the process group and runs `wineserver -k`.
+
+#### Build a local `.app` / `.dmg`
 
 ```bash
-npm run tauri:build            # host architecture
-npm run tauri:build -- --target universal-apple-darwin
+npm run tauri:build                                      # host architecture
+npm run tauri:build -- --target universal-apple-darwin   # Intel + Apple Silicon
+```
+
+Artifacts land in `src-tauri/target/release/bundle/` or, for the universal build, `src-tauri/target/universal-apple-darwin/release/bundle/` (`dmg/*.dmg` and `macos/*.app`). The bundles are unsigned; on another Mac clear the quarantine flag first:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/WinMac Launcher.app"
 ```
 
 ---
