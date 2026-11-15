@@ -44,6 +44,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # `tauri::generate_context!()` embeds `../dist` at compile time, so the
+      # frontend has to exist before `cargo test` compiles the library.
+      - name: Build frontend
+        run: npm run build
+
       - name: Run Rust unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
