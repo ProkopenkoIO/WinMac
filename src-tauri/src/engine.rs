@@ -331,7 +331,7 @@ mod macos {
             if seen.iter().any(|path| path == &canonical) {
                 continue;
             }
-            seen.push(canonical);
+            seen.push(canonical.clone());
 
             let meta = if candidate.managed {
                 read_meta(&candidate.root)

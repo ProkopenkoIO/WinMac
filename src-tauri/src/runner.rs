@@ -26,8 +26,8 @@ const MAX_LOG_LINES: usize = 2500;
 /* -------------------------------------------------------------------------- */
 
 #[cfg(target_os = "macos")]
-struct ProcessHandle {
-    container_id: String,
+pub struct ProcessHandle {
+    pub container_id: String,
     container_path: String,
     wine_path: String,
     prefix: String,
