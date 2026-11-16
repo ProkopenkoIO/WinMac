@@ -509,7 +509,7 @@ mod macos {
 
     pub fn resolve_binary(path: &Path) -> Option<PathBuf> {
         if path.is_file() {
-            return if is_wine_like(path) {
+            return if is_wine_like(path) && !is_app_launcher(path) {
                 Some(path.to_path_buf())
             } else {
                 None
@@ -525,32 +525,43 @@ mod macos {
             .unwrap_or(false)
     }
 
+    /// `Something.app/Contents/MacOS/wine` is the tiny GUI launcher that ships
+    /// inside macOS Wine bundles. Running it (even with `--version`) opens a
+    /// Wine window instead of printing anything, so it must never be picked as
+    /// the engine binary — the command line loader lives in `.../wine/bin/wine`.
+    pub fn is_app_launcher(path: &Path) -> bool {
+        let text = paths::path_string(path).to_lowercase();
+        text.contains("/contents/macos/")
+    }
+
     pub fn find_wine_binary(root: &Path) -> Option<PathBuf> {
         const RELATIVE: &[&str] = &[
-            "bin/wine64",
-            "bin/wine",
-            "wine64",
-            "wine",
             "Contents/Resources/wine/bin/wine64",
             "Contents/Resources/wine/bin/wine",
+            "bin/wine64",
+            "bin/wine",
             "Contents/SharedSupport/CrossOver/bin/wine",
             "Libraries/Wine/bin/wine64",
             "wine/bin/wine64",
+            "wine/bin/wine",
+            "wine64",
+            "wine",
         ];
         for relative in RELATIVE {
             let candidate = root.join(relative);
-            if candidate.is_file() {
+            if candidate.is_file() && !is_app_launcher(&candidate) {
                 return Some(candidate);
             }
         }
-        if root.is_file() && is_wine_like(root) {
+        if root.is_file() && is_wine_like(root) && !is_app_launcher(root) {
             return Some(root.to_path_buf());
         }
 
-        // Whisky archives nest their payload a few folders deep.
-        let mut fallback: Option<PathBuf> = None;
+        // Archives (Gcenx, Whisky, CrossOver) nest the payload a few folders
+        // deep, so rank every candidate instead of trusting traversal order.
+        let mut best: Option<(u32, usize, PathBuf)> = None;
         for entry in walkdir::WalkDir::new(root)
-            .max_depth(7)
+            .max_depth(8)
             .follow_links(false)
             .into_iter()
             .flatten()
@@ -558,29 +569,92 @@ mod macos {
             if !entry.file_type().is_file() || !is_wine_like(entry.path()) {
                 continue;
             }
-            let parent_name = entry
-                .path()
+            let path = entry.path();
+            if is_app_launcher(path) {
+                continue;
+            }
+            let lower = paths::path_string(path).to_lowercase();
+            let parent_name = path
                 .parent()
                 .and_then(|parent| parent.file_name())
                 .map(|name| name.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
-            if entry.file_name() == "wine64" && parent_name == "bin" {
-                return Some(entry.path().to_path_buf());
+            let mut score = 0u32;
+            if lower.contains("/resources/wine/bin/") {
+                score += 100;
             }
-            if fallback.is_none() {
-                fallback = Some(entry.path().to_path_buf());
+            if parent_name == "bin" {
+                score += 50;
+            }
+            if path.file_name().and_then(|name| name.to_str()) == Some("wine64") {
+                score += 10;
+            }
+            if lower.contains("/crossover/") {
+                score += 5;
+            }
+            let depth = entry.depth();
+            let better = match &best {
+                None => true,
+                Some((best_score, best_depth, _)) => {
+                    score > *best_score || (score == *best_score && depth < *best_depth)
+                }
+            };
+            if better {
+                best = Some((score, depth, path.to_path_buf()));
             }
         }
-        fallback
+        best.map(|(_, _, path)| path)
     }
 
     pub fn read_version(binary: &Path) -> Option<String> {
-        let output = std::process::Command::new(binary)
+        use std::io::Read;
+        use std::process::{Command, Stdio};
+        use std::sync::mpsc;
+
+        // Never execute the `.app` GUI stub: it opens windows and never exits.
+        if is_app_launcher(binary) {
+            return None;
+        }
+
+        let mut child = Command::new(binary)
             .arg("--version")
             .env("WINEDEBUG", "-all")
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
             .ok()?;
-        let text = String::from_utf8_lossy(&output.stdout);
+
+        // Read on a separate thread and with a receive timeout: a stray child
+        // holding the pipe open must not block engine detection either.
+        let mut stdout = child.stdout.take()?;
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = stdout.read_to_string(&mut text);
+            let _ = sender.send(text);
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                Err(_) => {
+                    let _ = child.kill();
+                    return None;
+                }
+            }
+        }
+
+        let text = receiver.recv_timeout(Duration::from_secs(5)).ok()?;
         let version = text.lines().next()?.trim().to_string();
         if version.is_empty() {
             None
@@ -624,6 +698,68 @@ mod macos {
         }
         invalidate_cache();
         Ok(target)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        fn scratch(name: &str) -> PathBuf {
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!("winmac-engine-{name}-{stamp}"));
+            fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        fn touch(path: &Path) {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"#!/bin/sh\n").unwrap();
+        }
+
+        #[test]
+        fn prefers_the_loader_over_the_app_stub() {
+            // Mirror the Gcenx layout: the GUI stub is found first alphabetically.
+            let root = scratch("gcenx");
+            let app = root.join("Wine Staging.app");
+            let loader = app.join("Contents/Resources/wine/bin/wine");
+            let stub = app.join("Contents/MacOS/wine");
+            touch(&loader);
+            touch(&stub);
+            touch(&app.join("Contents/Resources/wine/bin/wineserver"));
+
+            assert!(is_app_launcher(&stub));
+            assert!(!is_app_launcher(&loader));
+            assert_eq!(find_wine_binary(&root).unwrap(), loader);
+            assert!(resolve_binary(&stub).is_none());
+            assert!(read_version(&stub).is_none());
+
+            let _ = fs::remove_dir_all(&root);
+        }
+
+        #[test]
+        fn finds_a_plain_bin_layout() {
+            let root = scratch("plain");
+            let binary = root.join("bin/wine64");
+            touch(&binary);
+
+            assert_eq!(find_wine_binary(&root).unwrap(), binary);
+
+            let _ = fs::remove_dir_all(&root);
+        }
+
+        #[test]
+        fn ignores_a_folder_without_wine() {
+            let root = scratch("empty");
+            touch(&root.join("bin/wineserver"));
+
+            assert!(find_wine_binary(&root).is_none());
+
+            let _ = fs::remove_dir_all(&root);
+        }
     }
 }
 
@@ -671,10 +807,17 @@ pub fn winetricks_path(_app: &AppHandle) -> Option<PathBuf> {
 pub fn add_manual(app: &AppHandle, path: &str) -> AppResult<EngineStateDto> {
     let path = paths::expand_tilde(path);
     let binary = macos::resolve_binary(&path).ok_or_else(|| {
-        AppError::Message(format!(
-            "{} is not a Wine binary or engine folder",
-            path.display()
-        ))
+        if macos::is_app_launcher(&path) {
+            AppError::Message(format!(
+                "{} is the .app launcher, not the Wine loader. Choose the binary inside Contents/Resources/wine/bin instead.",
+                path.display()
+            ))
+        } else {
+            AppError::Message(format!(
+                "{} is not a Wine binary or engine folder",
+                path.display()
+            ))
+        }
     })?;
     let binary = fs::canonicalize(&binary).unwrap_or(binary);
 
@@ -1012,12 +1155,27 @@ async fn download_task(
         .await
         .map_err(|error| AppError::Message(error.to_string()))??;
 
-    let binary = macos::find_wine_binary(&destination).ok_or_else(|| {
-        AppError::Message("The archive did not contain a Wine binary".to_string())
-    })?;
+    let binary = match macos::find_wine_binary(&destination) {
+        Some(binary) => binary,
+        None => {
+            let _ = fs::remove_dir_all(&destination);
+            return message(
+                "The archive did not contain a Wine command line binary (only an .app launcher?)",
+            );
+        }
+    };
     make_executable(&destination);
-    let version = macos::read_version(&binary);
-    macos::write_meta(&destination, id, name, kind, &binary, version)?;
+    let version = match macos::read_version(&binary) {
+        Some(version) => version,
+        None => {
+            let _ = fs::remove_dir_all(&destination);
+            return message(format!(
+                "The downloaded Wine build did not respond to `wine --version` ({}). The install was discarded.",
+                paths::path_string(&binary)
+            ));
+        }
+    };
+    macos::write_meta(&destination, id, name, kind, &binary, Some(version))?;
     let _ = fs::remove_file(&archive_path);
 
     emit_progress(
